@@ -60,7 +60,7 @@ def list_remote(nas_host: str, remote_dir: str) -> list[str]:
 def pick_with_fzf(lines: list[str]) -> tuple[str, str]:
     """
     Returns (key, selection).
-      key is "" for Enter, or "ctrl-d" for Ctrl-D, or "right-click" for mouse right click.
+      key is "" for Enter, or "d"/"D" for download, or "" with empty selection for Esc.
     """
     p = subprocess.run(
         [
@@ -68,9 +68,8 @@ def pick_with_fzf(lines: list[str]) -> tuple[str, str]:
             "--height=90%",
             "--reverse",
             "--prompt=NAS> ",
-            "--header=Enter: open dir / download file | Right-click: download | Ctrl-D: download dir | Esc: quit",
-            "--expect=ctrl-d,right-click",
-            "--bind=right-click:accept",
+            "--header=Enter: open dir / download file | D: download dir | Esc: quit",
+            "--expect=d,D",
         ],
         input="".join(lines),
         text=True,
@@ -81,9 +80,10 @@ def pick_with_fzf(lines: list[str]) -> tuple[str, str]:
     if not out:
         return ("", "")
     if len(out) == 1:
+        # Enter accept without key line (rare), or edge case
         return ("", out[0].strip())
 
-    key = out[0].strip()   # "ctrl-d" / "right-click" / ""
+    key = out[0].strip()          # "d" / "D" / ""
     sel = out[1].strip()
     return (key, sel)
 
@@ -122,10 +122,7 @@ def main():
 
     while True:
         items = list_remote(NAS_HOST, remote_dir)
-
-        # Only real selectable entries. Add ../ ourselves.
         lines = ["../\n"] + [x + "\n" for x in items]
-
         key, choice = pick_with_fzf(lines)
 
         if not choice:
@@ -138,35 +135,26 @@ def main():
             continue
 
         is_dir = choice.endswith("/")
-
-        # Treat right-click as "download" for both files and dirs.
-        # Ctrl-D keeps its original "download dir" behavior (but also downloads files if used on them).
-        download_now = (key == "right-click") or (key == "ctrl-d")
+        download_dir_key = (key in ("d", "D"))
 
         if is_dir:
             dir_path = str(Path(remote_dir) / choice[:-1])
 
-            if download_now:
+            if download_dir_key:
                 print(f"⬇ Downloading directory: {dir_path}")
                 download(NAS_HOST, USE_RSYNC, dir_path, LOCAL_DEST, is_dir=True)
                 print("✅ Done.")
                 return 0
             else:
-                # Enter directory
                 remote_dir = dir_path
                 continue
 
-        # file selected
+        # file selected (Enter, or even D — we’ll just download the file)
         file_path = str(Path(remote_dir) / choice)
-
-        if download_now or key == "":
-            print(f"⬇ Downloading file: {file_path}")
-            download(NAS_HOST, USE_RSYNC, file_path, LOCAL_DEST, is_dir=False)
-            print("✅ Done.")
-            return 0
-
-    # unreachable
-    # return 0
+        print(f"⬇ Downloading file: {file_path}")
+        download(NAS_HOST, USE_RSYNC, file_path, LOCAL_DEST, is_dir=False)
+        print("✅ Done.")
+        return 0
 
 
 if __name__ == "__main__":
